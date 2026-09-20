@@ -9,7 +9,7 @@
   "FFlagDebugDisableTelemetryEphemeralCounter": "True",
   "DFIntBladeBallSwordComboWindowMs": "9999",
   "FIntTerrainOTAMaxTextureSize": "4",
-  "TaskSchedulerLimitTargetFpsTo2402": "False",
+  "TaskSchedulerLimitTargetFpsTo2402": "true",
   "TaskSchedulerTargetFps": "60",
   "DFIntPhysicsMaxAngularVelocity": "999999",
   "FFlagPreloadTextureItemsOption4": "True",
