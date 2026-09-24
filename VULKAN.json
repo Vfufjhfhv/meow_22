@@ -13,7 +13,7 @@
   "DFIntBladeBallSwordComboWindowMs": "9999",
   "FIntTerrainOTAMaxTextureSize": "4",
   "TaskSchedulerLimitTargetFpsTo2402": "False",
-  "TaskSchedulerTargetFps": "9999",
+  "TaskSchedulerTargetFps": "60",
   "DFIntPhysicsMaxAngularVelocity": "999999",
   "FFlagPreloadTextureItemsOption4": "True",
   "DFFlagBladeBallServerInstantBlockProcessing": "True",
