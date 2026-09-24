@@ -1,4 +1,7 @@
 {
+  "FFlagDebugGraphicsPreferVulkan": "True",
+  "FFlagDebugGraphicsDisableDirect3D11": "True",
+  "FFlagDebugGraphicsDisableVulkan": "False"
   "DFIntHACDPointSampleDistApartTenths": "2147483647",
   "DFFlagGraphicsOptimizationModeMVPExposureEnrollment3": "False",
   "DFIntBladeBallMinCurveAngle": "360",
