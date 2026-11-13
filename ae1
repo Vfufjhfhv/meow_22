@@ -1,118 +1,47 @@
---==================================================
--- RAKNET FAST PATH (AUTO-REFRESH)
---==================================================
+local heartbeatConn
 
-local rk_mod = raknet
-local HAS_RK = type(rk_mod) == "table"
-    and type(rk_mod.send) == "function"
-    and type(rk_mod.add_send_hook) == "function"
+local function startExecuteLoop()
+    if heartbeatConn then return end
 
-local rn = {
-    capturing   = false,
-    expect      = nil,
-    timeout     = 0,
-    payloadLen  = 0,
-    template    = nil,
-    offset      = 0,
-    priority    = 1,
-    reliability = 1,
-    ready       = false,
-    disabled    = false,
-    failCount   = 0,
-    lastCam     = nil,
-    lastRefresh = 0,
-}
-
-local REFRESH_INTERVAL = 0.15 -- 150ms refresh 1 lần (khoảng 6-7 lần/giây)
-local CAM_DIST_LIMIT = 5      -- Nếu camera di chuyển > 5 studs thì refresh
-local CAM_DOT_LIMIT = 0.98    -- Nếu camera xoay > ~11 độ thì refresh
-
-if HAS_RK then
-    rk_mod.add_send_hook(function(packet)
-        if not rn.capturing then return end
-        if os.clock() > rn.timeout then 
-            rn.capturing = false 
-            return 
+    heartbeatConn = RunService.PreSimulation:Connect(function()
+        if not captureReady and not initCaptureCache() then
+            local cam = camCF
+            if cam then tryFallback(cam, events, aimPos) end
+            return
         end
+
+        local cam = camCF
+        if not cam then return end
+
+        -- LẤY THỜI GIAN THỰC VÀ CỘNG THÊM 1
+        local realNow = math_floor(getServerTimeNow(Workspace) * 100) + 1
         
-        local data = packet.AsString or packet.Data or packet.Payload or packet.RawData
-        if type(data) ~= "string" then return end
+        local ts = tostring_(realNow)
+        local bytes = cachedTransformedBytes
+        local payload
 
-        local off = string.find(data, rn.expect, 1, true)
-        if not off then return end
+        if #ts == 12 then
+            local b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12 = string_byte(ts, 1, 12)
+            payload = string_char(
+                bit32_bxor(b1  + 1,  bytes[1]),  bit32_bxor(b2  + 2,  bytes[2]),
+                bit32_bxor(b3  + 3,  bytes[3]),  bit32_bxor(b4  + 4,  bytes[4]),
+                bit32_bxor(b5  + 5,  bytes[5]),  bit32_bxor(b6  + 6,  bytes[6]),
+                bit32_bxor(b7  + 7,  bytes[7]),  bit32_bxor(b8  + 8,  bytes[8]),
+                bit32_bxor(b9  + 9,  bytes[9]),  bit32_bxor(b10 + 10, bytes[10]),
+                bit32_bxor(b11 + 11, bytes[11]), bit32_bxor(b12 + 12, bytes[12])
+            )
+        else
+            local len = #ts
+            local chars = table_create(len)
+            for i = 1, len do
+                chars[i] = string_char(bit32_bxor(string_byte(ts, i) + i, bytes[i]))
+            end
+            payload = table_concat(chars)
+        end
 
-        rn.template    = data
-        rn.offset      = off
-        rn.payloadLen  = #rn.expect
-        rn.priority    = packet.Priority or 1
-        rn.reliability = packet.Reliability or 3
-        rn.ready       = true
-        rn.capturing   = false
+        cachedFireServer(
+            cachedRemote, cachedHash, cachedKey,
+            payload, 0.5, cam, events, aimPos, false
+        )
     end)
-end
-
-local function rk_fireReal(payload, cam)
-    if HAS_RK and not rn.capturing then
-        rn.capturing = true
-        rn.expect    = payload
-        rn.timeout   = os.clock() + 2
-    end
-    
-    cachedFireServer(cachedRemote, cachedHash, cachedKey,
-        payload, 0.5, cam, events, aimPos, false)
-        
-    rn.lastRefresh = os.clock()
-    rn.lastCam = cam
-end
-
-local function rk_fireFast(payload)
-    if not rn.ready or #payload ~= rn.payloadLen then return false end
-    local data = string.sub(rn.template, 1, rn.offset - 1)
-        .. payload
-        .. string.sub(rn.template, rn.offset + rn.payloadLen)
-    local ok, res = pcall(rk_mod.send, data, rn.priority, rn.reliability)
-    return ok and res ~= false
-end
-
--- Hàm kiểm tra xem có cần chụp lại template không
-local function rk_needsRefresh(cam)
-    if not rn.ready or rn.disabled then return true end
-    
-    -- 1. Refresh theo thời gian (bắt kịp target di chuyển)
-    local now = os.clock()
-    if now - rn.lastRefresh > REFRESH_INTERVAL then
-        return true
-    end
-    
-    -- 2. Refresh theo Camera (bắt kịp góc curve)
-    if rn.lastCam and cam then
-        local dp = (rn.lastCam.Position - cam.Position).Magnitude
-        local dv = rn.lastCam.LookVector:Dot(cam.LookVector)
-        if dp > CAM_DIST_LIMIT or dv < CAM_DOT_LIMIT then
-            return true
-        end
-    end
-    
-    return false
-end
-
-local function rk_fire(payload, cam)
-    -- Nếu cần template mới, gửi bằng FireServer thật (1 lần)
-    if rk_needsRefresh(cam) then
-        rk_fireReal(payload, cam)
-        return
-    end
-    
-    -- Nếu không, gửi xé gió bằng RakNet
-    if rk_fireFast(payload) then
-        rn.failCount = 0
-        return
-    end
-    
-    rn.failCount += 1
-    if rn.failCount >= 5 then
-        rn.disabled = true
-        warn("[77] RakNet disabled — fallback FireServer")
-    end
-    rk_fireReal(payload, cam)
 end
