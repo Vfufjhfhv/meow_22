@@ -1,97 +1,98 @@
 --==================================================
--- RAKNET FAST PATH (DEBUG VERSION)
+-- RAKNET FAST PATH (FINAL)
 --==================================================
 
 local rk_mod = raknet
-local HAS_RK = type(rk_mod) == "table" and type(rk_mod.send) == "function" and type(rk_mod.add_send_hook) == "function"
+local HAS_RK = type(rk_mod) == "table"
+    and type(rk_mod.send) == "function"
+    and type(rk_mod.add_send_hook) == "function"
 
 local rn = {
-    capturing = false,
-    expect = nil,
-    timeout = 0,
-    payloadLen = 0,
-    template = nil,
-    offset = 0,
-    priority = 1,
+    capturing   = false,
+    expect      = nil,
+    timeout     = 0,
+    payloadLen  = 0,
+    template    = nil,
+    offset      = 0,
+    priority    = 1,
     reliability = 1,
-    ready = false,
-    disabled = false,
-    failCount = 0,
+    ready       = false,
+    disabled    = false,
+    failCount   = 0,
 }
 
 if HAS_RK then
     rk_mod.add_send_hook(function(packet)
         if not rn.capturing then return end
-        if os.clock() > rn.timeout then rn.capturing = false; return end
-        
-        -- Lấy dữ liệu thô (thử nhiều thuộc tính khác nhau)
-        local data = packet.AsString or packet.Data or packet.Payload or packet.RawData
-        if type(data) ~= "string" then 
-            print("[77 Debug] Packet không có dữ liệu dạng string!")
+        if os.clock() > rn.timeout then 
+            rn.capturing = false 
             return 
         end
-
-        local off = string.find(data, rn.expect, 1, true)
         
-        if off then
-            -- Tìm thấy payload!
-            rn.template    = data
-            rn.offset      = off
-            rn.payloadLen  = #rn.expect
-            rn.priority    = packet.Priority or 1
-            rn.reliability = packet.Reliability or 3
-            rn.ready       = true
-            rn.capturing   = false
-            print(string.format("[77] RakNet CAPTURED! Size: %dB, Offset: %d", #data, off))
-        else
-            -- Không tìm thấy, debug xem có nén không
-            print(string.format("[77 Debug] Hook bắt được packet (%dB) nhưng KHÔNG khớp payload.", #data))
-            -- In thử 50 byte đầu để xem cấu trúc
-            print("[77 Debug] Hex: " .. string.format("%02X", string.byte(data, 1, 50)):gsub(" ", ""))
-            rn.capturing = false
-        end
+        -- Lấy dữ liệu thô
+        local data = packet.AsString or packet.Data or packet.Payload or packet.RawData
+        if type(data) ~= "string" then return end
+
+        -- Tìm payload trong packet
+        local off = string.find(data, rn.expect, 1, true)
+        if not off then return end
+
+        -- Lưu template
+        rn.template    = data
+        rn.offset      = off
+        rn.payloadLen  = #rn.expect
+        rn.priority    = packet.Priority or 1
+        rn.reliability = packet.Reliability or 3
+        rn.ready       = true
+        rn.capturing   = false
+        print(string.format("[77] RakNet Template Ready! Size: %dB, Offset: %d", #data, off))
     end)
-    print("[77 Debug] Đã đăng ký Hook RakNet thành công.")
-else
-    warn("[77 Debug] Không tìm thấy thư viện RakNet!")
 end
 
 local function rk_fireReal(payload, cam)
-    if HAS_RK and not rn.ready and not rn.disabled then
+    -- Kích hoạt chờ hook nếu chưa có template
+    if HAS_RK and not rn.ready and not rn.disabled and not rn.capturing then
         rn.capturing = true
         rn.expect    = payload
-        rn.timeout   = os.clock() + 2 -- Đợi tối đa 2 giây để hook bắt
-        print("[77 Debug] Đang gửi FireServer thật để lấy template...")
+        rn.timeout   = os.clock() + 2 -- Đợi tối đa 2 giây
     end
     
+    -- Gửi qua FireServer (chỉ chạy khi chưa capture được, hoặc RakNet lỗi)
     cachedFireServer(cachedRemote, cachedHash, cachedKey,
         payload, 0.5, cam, events, aimPos, false)
-        
-    -- Không tắt rn.capturing ở đây, để hook tự tắt sau khi bắt được
 end
 
 local function rk_fireFast(payload)
     if not rn.ready or #payload ~= rn.payloadLen then return false end
+    
+    -- Ghép payload mới vào template cũ
     local data = string.sub(rn.template, 1, rn.offset - 1)
         .. payload
         .. string.sub(rn.template, rn.offset + rn.payloadLen)
+        
+    -- Gửi thẳng qua RakNet
     local ok, res = pcall(rk_mod.send, data, rn.priority, rn.reliability)
     return ok and res ~= false
 end
 
 local function rk_fire(payload, cam)
+    -- Nếu chưa có template hoặc RakNet bị vô hiệu hóa -> Dùng FireServer
     if not rn.ready or rn.disabled then
         rk_fireReal(payload, cam)
         return
     end
+    
+    -- Thử gửi bằng RakNet
     if rk_fireFast(payload) then
         rn.failCount = 0
         return
     end
+    
+    -- Nếu RakNet lỗi 5 lần liên tiếp -> Tắt RakNet, quay về FireServer
     rn.failCount += 1
     if rn.failCount >= 5 then
         rn.disabled = true
-        warn("[77] RakNet disabled — fallback FireServer")
+        warn("[77] RakNet bị lỗi 5 lần — Đã chuyển về FireServer")
     end
     rk_fireReal(payload, cam)
 end
