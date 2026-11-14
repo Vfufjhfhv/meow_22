@@ -1,7 +1,12 @@
 local heartbeatConn
+local fakeTime = 0
+local lastPrintTime = 0
 
 local function startExecuteLoop()
     if heartbeatConn then return end
+
+    -- Khởi tạo mốc thời gian giả bằng thời gian thực lúc bắt đầu
+    fakeTime = math_floor(getServerTimeNow(Workspace) * 100)
 
     heartbeatConn = RunService.PreSimulation:Connect(function()
         if not captureReady and not initCaptureCache() then
@@ -13,10 +18,19 @@ local function startExecuteLoop()
         local cam = camCF
         if not cam then return end
 
-        -- LẤY THỜI GIAN THỰC VÀ CỘNG THÊM 1
-        local realNow = math_floor(getServerTimeNow(Workspace) * 100) + 1
+        -- ⚠️ TĂNG LÁO THỜI GIAN: Cứ mỗi frame cộng thêm 10 (tương đương 100ms)
+        fakeTime = fakeTime + 10 
         
-        local ts = tostring_(realNow)
+        -- In ra console mỗi 1 giây để xem độ lệch
+        local nowClock = os.clock()
+        if nowClock - lastPrintTime > 1 then
+            local realTime = math_floor(getServerTimeNow(Workspace) * 100)
+            local diff = fakeTime - realTime
+            print(string.format("[TEST] Thời gian giả đi trước thực tế: %d đơn vị (%.1f giây)", diff, diff / 100))
+            lastPrintTime = nowClock
+        end
+
+        local ts = tostring_(fakeTime)
         local bytes = cachedTransformedBytes
         local payload
 
