@@ -1,61 +1,80 @@
 local heartbeatConn
-local fakeTime = 0
-local lastPrintTime = 0
+local lastTs = 0
+local syncTimer = 0 -- Biến đếm thời gian để sync
 
 local function startExecuteLoop()
     if heartbeatConn then return end
 
-    -- Khởi tạo mốc thời gian giả bằng thời gian thực lúc bắt đầu
-    fakeTime = math_floor(getServerTimeNow(Workspace) * 100)
+    -- Reset lại bộ đếm khi bắt đầu
+    syncTimer = 0
+    lastTs = 0
 
-    heartbeatConn = RunService.PreSimulation:Connect(function()
+    heartbeatConn = RunService.PreSimulation:Connect(function(dt)
+        -- 1. Tính số lượng gói tin cần bắn
+        State.Accumulator += dt * State.TargetRPS
+        local fires = math_floor(State.Accumulator)
+        if fires < 1 then return end
+        State.Accumulator -= fires
+
+        -- 2. Kiểm tra bộ đệm
         if not captureReady and not initCaptureCache() then
             local cam = camCF
-            if cam then tryFallback(cam, events, aimPos) end
+            if cam then
+                for _ = 1, fires do tryFallback(cam, events, aimPos) end
+            end
             return
         end
 
         local cam = camCF
         if not cam then return end
 
-        -- ⚠️ TĂNG LÁO THỜI GIAN: Cứ mỗi frame cộng thêm 10 (tương đương 100ms)
-        fakeTime = fakeTime + 10 
-        
-        -- In ra console mỗi 1 giây để xem độ lệch
-        local nowClock = os.clock()
-        if nowClock - lastPrintTime > 1 then
-            local realTime = math_floor(getServerTimeNow(Workspace) * 100)
-            local diff = fakeTime - realTime
-            print(string.format("[TEST] Thời gian giả đi trước thực tế: %d đơn vị (%.1f giây)", diff, diff / 100))
-            lastPrintTime = nowClock
+        -- 3. CƠ CHẾ AUTO-SYNC MỖI 7 GIÂY
+        syncTimer += dt
+        if syncTimer >= 7 then
+            syncTimer = 0 -- Reset bộ đếm
+            -- Kéo lastTs về bằng thời gian thực để xóa mọi khoảng cách (drift)
+            lastTs = math_floor(getServerTimeNow(Workspace) * 100)
+            -- print("[SYNC] Đã đồng bộ lại thời gian sau 7 giây.") -- Bỏ comment để xem log
         end
 
-        local ts = tostring_(fakeTime)
+        -- 4. Lấy thời gian thực hiện tại
+        local realNow = math_floor(getServerTimeNow(Workspace) * 100)
         local bytes = cachedTransformedBytes
-        local payload
 
-        if #ts == 12 then
-            local b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12 = string_byte(ts, 1, 12)
-            payload = string_char(
-                bit32_bxor(b1  + 1,  bytes[1]),  bit32_bxor(b2  + 2,  bytes[2]),
-                bit32_bxor(b3  + 3,  bytes[3]),  bit32_bxor(b4  + 4,  bytes[4]),
-                bit32_bxor(b5  + 5,  bytes[5]),  bit32_bxor(b6  + 6,  bytes[6]),
-                bit32_bxor(b7  + 7,  bytes[7]),  bit32_bxor(b8  + 8,  bytes[8]),
-                bit32_bxor(b9  + 9,  bytes[9]),  bit32_bxor(b10 + 10, bytes[10]),
-                bit32_bxor(b11 + 11, bytes[11]), bit32_bxor(b12 + 12, bytes[12])
-            )
-        else
-            local len = #ts
-            local chars = table_create(len)
-            for i = 1, len do
-                chars[i] = string_char(bit32_bxor(string_byte(ts, i) + i, bytes[i]))
+        -- 5. Bắn Burst
+        for i = 1, fires do
+            local currentTs = realNow
+            if currentTs <= lastTs then
+                currentTs = lastTs + 1
             end
-            payload = table_concat(chars)
-        end
+            lastTs = currentTs
 
-        cachedFireServer(
-            cachedRemote, cachedHash, cachedKey,
-            payload, 0.5, cam, events, aimPos, false
-        )
+            local ts = tostring_(currentTs)
+            local payload
+
+            if #ts == 12 then
+                local b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12 = string_byte(ts, 1, 12)
+                payload = string_char(
+                    bit32_bxor(b1  + 1,  bytes[1]),  bit32_bxor(b2  + 2,  bytes[2]),
+                    bit32_bxor(b3  + 3,  bytes[3]),  bit32_bxor(b4  + 4,  bytes[4]),
+                    bit32_bxor(b5  + 5,  bytes[5]),  bit32_bxor(b6  + 6,  bytes[6]),
+                    bit32_bxor(b7  + 7,  bytes[7]),  bit32_bxor(b8  + 8,  bytes[8]),
+                    bit32_bxor(b9  + 9,  bytes[9]),  bit32_bxor(b10 + 10, bytes[10]),
+                    bit32_bxor(b11 + 11, bytes[11]), bit32_bxor(b12 + 12, bytes[12])
+                )
+            else
+                local len = #ts
+                local chars = table_create(len)
+                for j = 1, len do
+                    chars[j] = string_char(bit32_bxor(string_byte(ts, j) + j, bytes[j]))
+                end
+                payload = table_concat(chars)
+            end
+
+            cachedFireServer(
+                cachedRemote, cachedHash, cachedKey,
+                payload, 0.5, cam, events, aimPos, false
+            )
+        end
     end)
 end
