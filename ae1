@@ -1,16 +1,14 @@
 local heartbeatConn
 local lastTs = 0
-local syncTimer = 0 -- Biến đếm thời gian để sync
 
 local function startExecuteLoop()
     if heartbeatConn then return end
 
-    -- Reset lại bộ đếm khi bắt đầu
-    syncTimer = 0
     lastTs = 0
+    State.Accumulator = 0
 
     heartbeatConn = RunService.PreSimulation:Connect(function(dt)
-        -- 1. Tính số lượng gói tin cần bắn
+        -- 1. Tính số gói cần bắn trong frame này (TargetRPS = 100)
         State.Accumulator += dt * State.TargetRPS
         local fires = math_floor(State.Accumulator)
         if fires < 1 then return end
@@ -28,30 +26,22 @@ local function startExecuteLoop()
         local cam = camCF
         if not cam then return end
 
-        -- 3. CƠ CHẾ AUTO-SYNC MỖI 7 GIÂY
-        syncTimer += dt
-        if syncTimer >= 7 then
-            syncTimer = 0 -- Reset bộ đếm
-            -- Kéo lastTs về bằng thời gian thực để xóa mọi khoảng cách (drift)
-            lastTs = math_floor(getServerTimeNow(Workspace) * 100)
-            -- print("[SYNC] Đã đồng bộ lại thời gian sau 7 giây.") -- Bỏ comment để xem log
-        end
-
-        -- 4. Lấy thời gian thực hiện tại
-        local realNow = math_floor(getServerTimeNow(Workspace) * 100)
+        -- 3. Lấy mốc thời gian cơ sở
+        local baseTs = math_floor(getServerTimeNow(Workspace) * 100)
         local bytes = cachedTransformedBytes
 
-        -- 5. Bắn Burst
+        -- 4. Bắn Burst nhẹ (1-2 gói/frame)
         for i = 1, fires do
-            local currentTs = realNow
-            if currentTs <= lastTs then
-                currentTs = lastTs + 1
+            -- Đảm bảo Timestamp nhích lên từng gói
+            if baseTs <= lastTs then
+                baseTs = lastTs + 1
             end
-            lastTs = currentTs
+            lastTs = baseTs
 
-            local ts = tostring_(currentTs)
+            local ts = tostring_(baseTs)
             local payload
 
+            -- Build Payload
             if #ts == 12 then
                 local b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12 = string_byte(ts, 1, 12)
                 payload = string_char(
